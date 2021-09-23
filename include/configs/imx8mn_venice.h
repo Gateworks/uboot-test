@@ -57,7 +57,7 @@
 	"preboot=gsc wd-disable\0" \
 	"console=ttymxc1,115200\0" \
 	"update_firmware=" \
-		"tftpboot $loadaddr $image && " \
+		"tftpboot $loadaddr venice/venice-imx8mn-flash.bin && " \
 		"setexpr blkcnt $filesize + 0x1ff && " \
 		"setexpr blkcnt $blkcnt / 0x200 && " \
 		"mmc dev $dev && " \
