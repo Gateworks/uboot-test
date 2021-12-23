@@ -513,7 +513,7 @@ static const struct ehci_ops mx6_ehci_ops = {
 
 static int ehci_usb_phy_mode(struct udevice *dev)
 {
-	struct usb_plat *plat = dev_get_plat(dev);
+	struct ehci_mx6_priv_data *priv = dev_get_priv(dev);
 	void *__iomem addr = dev_read_addr_ptr(dev);
 	void *__iomem phy_ctrl, *__iomem phy_status;
 	const void *blob = gd->fdt_blob;
@@ -540,18 +540,18 @@ static int ehci_usb_phy_mode(struct udevice *dev)
 		val = readl(phy_ctrl);
 
 		if (val & USBPHY_CTRL_OTG_ID)
-			plat->init_type = USB_INIT_DEVICE;
+			priv->init_type = USB_INIT_DEVICE;
 		else
-			plat->init_type = USB_INIT_HOST;
-	} else if (is_mx7()) {
+			priv->init_type = USB_INIT_HOST;
+	} else if (is_mx7() || is_imx8mm() || is_imx8mn()) {
 		phy_status = (void __iomem *)(addr +
 					      USBNC_PHY_STATUS_OFFSET);
 		val = readl(phy_status);
 
 		if (val & USBNC_PHYSTATUS_ID_DIG)
-			plat->init_type = USB_INIT_DEVICE;
+			priv->init_type = USB_INIT_DEVICE;
 		else
-			plat->init_type = USB_INIT_HOST;
+			priv->init_type = USB_INIT_HOST;
 	} else {
 		return -EINVAL;
 	}
@@ -559,19 +559,19 @@ static int ehci_usb_phy_mode(struct udevice *dev)
 	return 0;
 }
 
-static int ehci_usb_of_to_plat(struct udevice *dev)
+static int ehci_usb_dr_mode(struct udevice *dev)
 {
-	struct usb_plat *plat = dev_get_plat(dev);
+	struct ehci_mx6_priv_data *priv = dev_get_priv(dev);
 	enum usb_dr_mode dr_mode;
 
 	dr_mode = usb_get_dr_mode(dev_ofnode(dev));
 
 	switch (dr_mode) {
 	case USB_DR_MODE_HOST:
-		plat->init_type = USB_INIT_HOST;
+		priv->init_type = USB_INIT_HOST;
 		break;
 	case USB_DR_MODE_PERIPHERAL:
-		plat->init_type = USB_INIT_DEVICE;
+		priv->init_type = USB_INIT_DEVICE;
 		break;
 	case USB_DR_MODE_OTG:
 	case USB_DR_MODE_UNKNOWN:
@@ -639,10 +639,8 @@ static int mx6_parse_dt_addrs(struct udevice *dev)
 
 static int ehci_usb_probe(struct udevice *dev)
 {
-	struct usb_plat *plat = dev_get_plat(dev);
 	struct usb_ehci *ehci = dev_read_addr_ptr(dev);
 	struct ehci_mx6_priv_data *priv = dev_get_priv(dev);
-	enum usb_init_type type = plat->init_type;
 	struct ehci_hccr *hccr;
 	struct ehci_hcor *hcor;
 	int ret;
@@ -660,8 +658,6 @@ static int ehci_usb_probe(struct udevice *dev)
 		return ret;
 
 	priv->ehci = ehci;
-	priv->init_type = type;
-	priv->phy_type = usb_get_phy_mode(dev_ofnode(dev));
 
 #if CONFIG_IS_ENABLED(CLK)
 	ret = clk_get_by_index(dev, 0, &priv->clk);
@@ -676,6 +672,11 @@ static int ehci_usb_probe(struct udevice *dev)
 	enable_usboh3_clk(1);
 	mdelay(1);
 #endif
+
+	ret = ehci_usb_dr_mode(dev);
+	if (ret)
+		goto err_clk;
+	priv->phy_type = usb_get_phy_mode(dev_ofnode(dev));
 
 #if CONFIG_IS_ENABLED(DM_REGULATOR)
 	ret = device_get_supply_regulator(dev, "vbus-supply",
@@ -700,7 +701,7 @@ static int ehci_usb_probe(struct udevice *dev)
 #if CONFIG_IS_ENABLED(DM_REGULATOR)
 	if (priv->vbus_supply) {
 		ret = regulator_set_enable(priv->vbus_supply,
-					   (type == USB_INIT_DEVICE) ?
+					   (priv->init_type == USB_INIT_DEVICE) ?
 					   false : true);
 		if (ret && ret != -ENOSYS) {
 			printf("Error enabling VBUS supply (ret=%i)\n", ret);
@@ -785,11 +786,9 @@ U_BOOT_DRIVER(usb_mx6) = {
 	.name	= "ehci_mx6",
 	.id	= UCLASS_USB,
 	.of_match = mx6_usb_ids,
-	.of_to_plat = ehci_usb_of_to_plat,
 	.probe	= ehci_usb_probe,
 	.remove = ehci_usb_remove,
 	.ops	= &ehci_usb_ops,
-	.plat_auto	= sizeof(struct usb_plat),
 	.priv_auto	= sizeof(struct ehci_mx6_priv_data),
 	.flags	= DM_FLAG_ALLOC_PRIV_DMA,
 };
